@@ -1242,6 +1242,7 @@ func (cc *ClientConn) awaitOpenSlotForRequest(req *http.Request) error {
 // requires cc.wmu be held
 func (cc *ClientConn) writeHeaders(streamID uint32, endStream bool, maxFrameSize int, hdrs []byte) error {
 	first := true // first frame written (HEADERS is first, then CONTINUATION)
+	cc.vlogf("client writing headers on sid %d", streamID)
 	for len(hdrs) > 0 && cc.werr == nil {
 		chunk := hdrs
 		if len(chunk) > maxFrameSize {
@@ -2146,11 +2147,13 @@ func (b transportResponseBody) Close() error {
 	unread := cs.bufPipe.Len()
 
 	if unread > 0 || !serverSentStreamEnd {
+		gotUnexpectedReset := false
 		cc.mu.Lock()
 		cc.wmu.Lock()
 		if !serverSentStreamEnd {
 			cc.fr.WriteRSTStream(cs.ID, ErrCodeCancel)
 			cs.didReset = true
+			gotUnexpectedReset = true
 		}
 		// Return connection-level flow control.
 		if unread > 0 {
@@ -2160,6 +2163,9 @@ func (b transportResponseBody) Close() error {
 		cc.bw.Flush()
 		cc.wmu.Unlock()
 		cc.mu.Unlock()
+		if gotUnexpectedReset {
+			cc.vlogf("unexpected reset on sid %d unread %d pipe err %v", cs.ID, unread, cs.bufPipe.Err())
+		}
 	}
 
 	cs.bufPipe.BreakWithError(errClosedResponseBody)
@@ -2171,6 +2177,9 @@ func (rl *clientConnReadLoop) processData(f *DataFrame) error {
 	cc := rl.cc
 	cs := cc.streamByID(f.StreamID, f.StreamEnded())
 	data := f.Data()
+	if !f.StreamEnded() && cs != nil {
+		cc.vlogf("in-data !end sid %d len %d pipe err %v", f.StreamID, f.Length, cs.bufPipe.Err())
+	}
 	if cs == nil {
 		cc.mu.Lock()
 		neverSent := cc.nextStreamID
@@ -2257,6 +2266,7 @@ func (rl *clientConnReadLoop) processData(f *DataFrame) error {
 	}
 
 	if f.StreamEnded() {
+		cc.vlogf("in-data +end sid %d len %d pipe err %v", f.StreamID, f.Length, cs.bufPipe.Err())
 		rl.endStream(cs)
 	}
 	return nil

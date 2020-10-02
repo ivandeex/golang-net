@@ -999,6 +999,7 @@ func (sc *serverConn) writeDataFromHandler(stream *stream, data []byte, endStrea
 	ch := errChanPool.Get().(chan error)
 	writeArg := writeDataPool.Get().(*writeData)
 	*writeArg = writeData{stream.id, data, endStream}
+	sc.vlogf("send data start sid %d len %d end %v", stream.id, len(data), endStream)
 	err := sc.writeFrameFromHandler(FrameWriteRequest{
 		write:  writeArg,
 		stream: stream,
@@ -1010,6 +1011,7 @@ func (sc *serverConn) writeDataFromHandler(stream *stream, data []byte, endStrea
 	var frameWriteDone bool // the frame write is done (successfully or not)
 	select {
 	case err = <-ch:
+		sc.vlogf("send data done sid %d len %d end %v", stream.id, len(data), endStream)
 		frameWriteDone = true
 	case <-sc.doneServing:
 		return errClientDisconnected
@@ -1023,8 +1025,10 @@ func (sc *serverConn) writeDataFromHandler(stream *stream, data []byte, endStrea
 		// close.
 		select {
 		case err = <-ch:
+			sc.vlogf("send data done uncanceled on sid %d len %d end %v", stream.id, len(data), endStream)
 			frameWriteDone = true
 		default:
+			sc.vlogf("send data cancel on sid %d len %d end %v", stream.id, len(data), endStream)
 			return errStreamClosed
 		}
 	}
@@ -1185,6 +1189,12 @@ func (sc *serverConn) wroteFrame(res frameWriteResult) {
 	sc.writingFrameAsync = false
 
 	wr := res.wr
+
+	if w, ok := res.wr.write.(*writeData); ok {
+		if VerboseLogs && (len(w.p) > 1000 || w.endStream) {
+			log.Printf("wroteData frame on sid %d len %d end %v", w.streamID, len(w.p), w.endStream)
+		}
+	}
 
 	if writeEndsStream(wr.write) {
 		st := wr.stream
@@ -1499,6 +1509,7 @@ func (sc *serverConn) processResetStream(f *RSTStreamFrame) error {
 	if st != nil {
 		st.cancelCtx()
 		sc.closeStream(st, streamError(f.StreamID, f.ErrCode))
+		sc.vlogf("stream reset on sid %d (maybe delay it?)", f.StreamID)
 	}
 	return nil
 }
@@ -1878,6 +1889,7 @@ func (sc *serverConn) processHeaders(f *MetaHeadersFrame) error {
 		sc.conn.SetReadDeadline(time.Time{})
 	}
 
+	sc.vlogf("headers serve run handler for path %s", req.URL.Path)
 	go sc.runHandler(rw, req, handler)
 	return nil
 }

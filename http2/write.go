@@ -106,6 +106,9 @@ func (w *writeData) String() string {
 }
 
 func (w *writeData) writeFrame(ctx writeContext) error {
+	if VerboseLogs && (len(w.p) > 1000 || w.endStream) {
+		log.Printf("writeData.writeFrame on sid %d len %d end %v", w.streamID, len(w.p), w.endStream)
+	}
 	return ctx.Framer().WriteData(w.streamID, w.endStream, w.p)
 }
 
@@ -190,6 +193,12 @@ type writeResHeaders struct {
 
 func encKV(enc *hpack.Encoder, k, v string) {
 	if VerboseLogs {
+		switch k {
+		case "server", "date", "content-type":
+			// hide trivial headers, print only important ones
+			enc.WriteField(hpack.HeaderField{Name: k, Value: v})
+			return
+		}
 		log.Printf("http2: server encoding header %q = %q", k, v)
 	}
 	enc.WriteField(hpack.HeaderField{Name: k, Value: v})

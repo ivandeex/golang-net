@@ -1588,6 +1588,9 @@ func summarizeFrame(f Frame) string {
 			buf.Truncate(buf.Len() - 1) // remove trailing comma
 		}
 	case *DataFrame:
+		if true {
+			break // this is way too verbose, we don't need content
+		}
 		data := f.Data()
 		const max = 256
 		if len(data) > max {
